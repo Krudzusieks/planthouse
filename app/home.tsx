@@ -59,30 +59,46 @@ export default function HomeScreen() {
   const [changingPassword, setChangingPassword]   = useState(false);
   const [showNew, setShowNew]                     = useState(false);
   const [showConfirm, setShowConfirm]             = useState(false);
+  const [firstLoginEmail, setFirstLoginEmail]     = useState('');
 
   useEffect(() => {
     if (profile?.must_change_password) setShowPasswordModal(true);
   }, [profile?.must_change_password]);
 
-  const handleChangePassword = async () => {
-    if (!newPassword.trim())             return Alert.alert('Required', 'Enter your new password.');
-    if (newPassword.length < 6)          return Alert.alert('Too short', 'Password must be at least 6 characters.');
-    if (newPassword !== confirmPassword) return Alert.alert('Mismatch', 'Passwords do not match.');
+const handleChangePassword = async () => {
+  if (!newPassword.trim())
+    return Alert.alert('Required', 'Enter your new password.');
+  if (newPassword.length < 6)
+    return Alert.alert('Too short', 'Password must be at least 6 characters.');
+  if (newPassword !== confirmPassword)
+    return Alert.alert('Mismatch', 'Passwords do not match.');
 
-    setChangingPassword(true);
-    const { error: authError } = await supabase.auth.updateUser({ password: newPassword });
-    if (authError) { setChangingPassword(false); return Alert.alert('Error', authError.message); }
+  setChangingPassword(true);
 
-    const { error: profileError } = await supabase
-      .from('profiles').update({ must_change_password: false }).eq('id', profile?.id);
+  // ✅ ONLY change password in auth
+  const { error: authError } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (authError) {
     setChangingPassword(false);
-    if (profileError) return Alert.alert('Error', profileError.message);
+    return Alert.alert('Error', authError.message);
+  }
 
-    setShowPasswordModal(false);
-    setNewPassword('');
-    setConfirmPassword('');
-    Alert.alert('Password Changed', 'Your password has been updated successfully.');
-  };
+  // ✅ Save email in profile ONLY (NOT auth)
+  await supabase.from('profiles').update({
+    email: firstLoginEmail.trim().toLowerCase() || null,
+    must_change_password: false,
+  }).eq('id', profile?.id);
+
+  setChangingPassword(false);
+  setShowPasswordModal(false);
+  setNewPassword('');
+  setConfirmPassword('');
+  setFirstLoginEmail('');
+
+  Alert.alert('Done', 'Your account is ready.');
+};
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -117,7 +133,10 @@ export default function HomeScreen() {
               <Text style={styles.greeting}>
                 {getGreeting()}, {profile?.full_name?.split(' ')[0] ?? 'there'}
               </Text>
-              <Text style={styles.companyName}>{company?.name ?? ''}</Text>
+              <Text style={styles.companyName}>
+                {company?.name ?? ''}
+                {company?.code ? <Text style={styles.companyCode}>  ({company.code})</Text> : null}
+              </Text>
             </View>
             <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
               <LogOut size={14} color="#7FAE7A" strokeWidth={2.5} />
@@ -189,6 +208,26 @@ export default function HomeScreen() {
               <Text style={styles.pwModalSubtitle}>
                 Your account was created with a temporary password.{'\n'}Please set a new private password now.
               </Text>
+
+              {/* Optional email for workers */}
+              {role === 'worker' && (
+                <>
+                  <Text style={styles.pwLabel}>YOUR EMAIL (optional)</Text>
+                  <TextInput
+                    style={styles.pwEmailInput}
+                    placeholder="your@email.com"
+                    placeholderTextColor="#3D5C3A"
+                    value={firstLoginEmail}
+                    onChangeText={setFirstLoginEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoCorrect={false}
+                  />
+                  <Text style={styles.pwEmailHint}>
+                    If you add your email you can log in with it and reset your own password in the future.
+                  </Text>
+                </>
+              )}
 
               {/* New password */}
               <Text style={styles.pwLabel}>NEW PASSWORD</Text>
@@ -263,7 +302,7 @@ export default function HomeScreen() {
                 }
               </TouchableOpacity>
 
-              <View style={styles.pwFooterRow}>
+              <View style={styles.pwFooter}>
                 <Lock size={12} color="#3D5C3A" strokeWidth={2} />
                 <Text style={styles.pwFooter}>Your boss will not know your new password</Text>
               </View>
@@ -299,6 +338,7 @@ const styles = StyleSheet.create({
   },
   greeting:    { color: '#E8F5E0', fontSize: 22, fontWeight: '800', marginBottom: 2 },
   companyName: { color: '#7FAE7A', fontSize: 14, fontWeight: '500' },
+  companyCode: { color: '#3D5C3A', fontSize: 13, fontWeight: '400' },
   signOutBtn:  {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1.5, borderColor: '#243524', borderRadius: 10,
@@ -337,33 +377,31 @@ const styles = StyleSheet.create({
     padding: 28, paddingBottom: 48,
   },
   pwLockIcon:   { alignItems: 'center', marginBottom: 20 },
-  pwLockCircle: {
-    width: 68, height: 68, borderRadius: 34,
-    backgroundColor: 'rgba(76,175,80,0.12)', borderWidth: 1.5,
-    borderColor: 'rgba(76,175,80,0.3)', alignItems: 'center', justifyContent: 'center',
+  pwLockCircle: { width: 60, height: 60, backgroundColor: '#4CAF50', borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  pwModalTitle: { color: '#E8F5E0', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  pwModalSubtitle: {
+    color: '#A8BDA6', fontSize: 14, fontWeight: '600', textAlign: 'center', marginBottom: 30,
   },
-  pwModalTitle:    { color: '#E8F5E0', fontSize: 24, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
-  pwModalSubtitle: { color: '#7FAE7A', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 28 },
-  pwLabel: { color: '#3D5C3A', fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 8 },
-  pwInputRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#0E1A12', borderWidth: 1.5, borderColor: '#243524',
-    borderRadius: 12, marginBottom: 16,
+
+  pwLabel:        { color: '#A8BDA6', fontSize: 13, fontWeight: '500' },
+  pwEmailInput:   {
+    backgroundColor: '#1C2B1F', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12,
+    marginTop: 6, marginBottom: 12, fontSize: 16, color: '#E8F5E0', borderWidth: 1.5, borderColor: '#3D5C3A',
   },
-  pwInput:  { flex: 1, paddingHorizontal: 14, paddingVertical: 14, color: '#E8F5E0', fontSize: 15 },
-  eyeBtn:   { paddingHorizontal: 14, paddingVertical: 14 },
-  pwHints:  { marginBottom: 20, gap: 8 },
-  pwHintRow:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pwHint:   { color: '#3D5C3A', fontSize: 13 },
-  pwHintOk: { color: '#4CAF50' },
-  pwConfirmBtn: {
-    backgroundColor: '#4CAF50', borderRadius: 14, paddingVertical: 17,
-    alignItems: 'center', shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8,
-    elevation: 4, marginBottom: 14,
+  pwEmailHint:    { color: '#A8BDA6', fontSize: 12, fontWeight: '500', textAlign: 'center', marginTop: 10 },
+  pwInputRow:     { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  pwInput:        { flex: 1, backgroundColor: '#1C2B1F', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12, color: '#E8F5E0', fontSize: 16 },
+  eyeBtn:         { paddingLeft: 12 },
+  pwHints:         { marginTop: 20 },
+  pwHintRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  pwHint:         { fontSize: 12, color: '#A8BDA6', fontWeight: '500' },
+  pwHintOk:       { color: '#4CAF50', fontWeight: '600' },
+
+  pwConfirmBtn:   {
+    backgroundColor: '#4CAF50', paddingVertical: 16, borderRadius: 12, alignItems: 'center',
   },
-  pwConfirmDisabled: { opacity: 0.4 },
-  pwConfirmText:     { color: '#fff', fontWeight: '800', fontSize: 16 },
-  pwFooterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  pwFooter:    { color: '#3D5C3A', fontSize: 12 },
+  pwConfirmDisabled: { opacity: 0.5 },
+  pwConfirmText:   { color: '#E8F5E0', fontSize: 16, fontWeight: '600' },
+  pwFooter:        { flexDirection: 'row', alignItems: 'center', marginTop: 28 },
+  pwFooterText:    { fontSize: 12, color: '#A8BDA6' },
 });

@@ -35,6 +35,7 @@ import { useAuth } from '../context/AuthContext';
 interface Worker {
   id: string;
   full_name: string;
+  username: string;        // ← Fixed: now we store username
   role: 'worker' | 'manager';
   phone: string | null;
 }
@@ -44,7 +45,8 @@ const ROLES = [
   { value: 'manager', label: 'Manager', icon: ClipboardList, color: '#FFA726' },
 ] as const;
 
-const toUsername = (name: string) => name.toLowerCase().replace(/\s+/g, '');
+const toUsername = (name: string) =>
+  name.toLowerCase().replace(/\s+/g, '');
 
 export default function WorkersScreen() {
   const router = useRouter();
@@ -52,8 +54,6 @@ export default function WorkersScreen() {
 
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Create modal
   const [createVisible, setCreateVisible] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -61,21 +61,20 @@ export default function WorkersScreen() {
   const [newRole, setNewRole] = useState<'worker' | 'manager'>('worker');
   const [creating, setCreating] = useState(false);
 
-  // Reset password modal
   const [resetVisible, setResetVisible] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetting, setResetting] = useState(false);
 
   const isBoss = profile?.role === 'boss';
-  const slug = company?.slug ?? '';
+  const workspaceCode = company?.code ?? company?.slug ?? '';
 
   const fetchWorkers = useCallback(async () => {
     if (!company?.id || !isBoss) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, role, phone')
+      .select('id, full_name, username, role, phone')   // ← username is now selected
       .eq('company_id', company.id)
       .in('role', ['worker', 'manager'])
       .order('full_name');
@@ -86,25 +85,23 @@ export default function WorkersScreen() {
     setLoading(false);
   }, [company?.id, isBoss]);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchWorkers();
-    }, [fetchWorkers])
-  );
+  useFocusEffect(useCallback(() => { fetchWorkers(); }, [fetchWorkers]));
 
-  // ── Create worker ─────────────────────────────────────────────
   const handleCreate = async () => {
     if (!newName.trim()) return Alert.alert('Required', 'Enter worker name.');
     if (!newPassword.trim()) return Alert.alert('Required', 'Enter a temporary password.');
     if (newPassword.length < 6) return Alert.alert('Too short', 'Password must be at least 6 characters.');
 
     const username = toUsername(newName.trim());
-    if (username.length < 2) return Alert.alert('Invalid Name', 'Name must contain at least 2 characters.');
+    if (username.length < 2)
+      return Alert.alert('Invalid Name', 'Name must contain at least 2 characters.');
 
-    const fakeEmail = `${username}@${slug}.planthouse`;
+    // Internal email used only by Supabase Auth (worker never sees this)
+    const internalEmail = `${username}@${workspaceCode}.planthouse`;
 
     setCreating(true);
     try {
+      // Check duplicate name
       const { data: existing } = await supabase
         .from('profiles')
         .select('id')
@@ -115,25 +112,27 @@ export default function WorkersScreen() {
       if (existing) throw new Error(`A worker named "${newName.trim()}" already exists.`);
 
       const { data: { session: bossSession } } = await supabase.auth.getSession();
-      if (!bossSession) throw new Error('No active boss session');
-
+      if (!bossSession) throw new Error('No active boss session.');
       const bossUserId = bossSession.user.id;
 
       lockSession();
 
+      // Create auth user with internal fake email
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
-        email: fakeEmail,
+        email: internalEmail,
         password: newPassword.trim(),
       });
 
       if (signUpError) throw signUpError;
-      if (!authData.user) throw new Error('No user returned from signUp');
+      if (!authData.user) throw new Error('No user returned from signUp.');
 
       const newUserId = authData.user.id;
 
+      // Create profile with username (this is the key fix)
       const { error: profileError } = await supabase.from('profiles').insert({
         id: newUserId,
         full_name: newName.trim(),
+        username: username,                    // ← IMPORTANT FIX
         phone: newPhone.trim() || null,
         role: newRole,
         company_id: company?.id,
@@ -146,25 +145,24 @@ export default function WorkersScreen() {
           refresh_token: bossSession.refresh_token,
         });
         unlockSession(bossUserId);
-
         try {
           await supabase.rpc('delete_auth_user', { user_id: newUserId });
         } catch (_) {}
-
         throw profileError;
       }
 
+      // Restore boss session
       const { error: restoreError } = await supabase.auth.setSession({
         access_token: bossSession.access_token,
         refresh_token: bossSession.refresh_token,
       });
-
       if (restoreError) throw restoreError;
+
       unlockSession(bossUserId);
 
       Alert.alert(
         'Worker Created',
-        `${newName.trim()} has been added.\n\nLogin: ${username}@${slug}\nTemporary password: ${newPassword.trim()}\n\nThey'll be asked to change it on first login.`
+        `${newName.trim()} has been added.\n\nLogin: ${username}.${workspaceCode}\nTemporary Password: ${newPassword.trim()}\n\nThey will be asked to set a new password on first login.`
       );
 
       setNewName('');
@@ -181,7 +179,6 @@ export default function WorkersScreen() {
     }
   };
 
-  // ── Reset password ────────────────────────────────────────────
   const openResetModal = (worker: Worker) => {
     setSelectedWorker(worker);
     setResetPassword('');
@@ -199,12 +196,11 @@ export default function WorkersScreen() {
         worker_id: selectedWorker.id,
         new_password: resetPassword.trim(),
       });
-
       if (error) throw error;
 
       Alert.alert(
         'Password Reset',
-        `Password for ${selectedWorker.full_name} has been reset.\n\nNew temporary password: ${resetPassword.trim()}\n\nThey will be required to change it on next login.`
+        `${selectedWorker.full_name} can now log in with:\n${selectedWorker.username}.${workspaceCode}\nPassword: ${resetPassword.trim()}`
       );
 
       setResetVisible(false);
@@ -217,7 +213,6 @@ export default function WorkersScreen() {
     }
   };
 
-  // ── Change role ───────────────────────────────────────────────
   const handleChangeRole = (worker: Worker) => {
     const next = worker.role === 'worker' ? 'manager' : 'worker';
     Alert.alert('Change Role', `Set ${worker.full_name} as ${next}?`, [
@@ -233,7 +228,6 @@ export default function WorkersScreen() {
     ]);
   };
 
-  // ── Delete worker ─────────────────────────────────────────────
   const handleDelete = (worker: Worker) => {
     Alert.alert('Delete Worker', `Permanently delete ${worker.full_name}?\n\nThis cannot be undone.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -264,8 +258,8 @@ export default function WorkersScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.blob, styles.blob1]} />
+
       <SafeAreaView style={{ flex: 1 }}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
             <ArrowLeft size={20} color="#7FAE7A" strokeWidth={2.5} />
@@ -297,13 +291,18 @@ export default function WorkersScreen() {
                 return (
                   <View key={worker.id} style={styles.workerCard}>
                     <View style={styles.workerHeader}>
-                      <View style={[styles.workerIconBox, { backgroundColor: roleColor + '22', borderColor: roleColor + '55' }]}>
+                      <View
+                        style={[
+                          styles.workerIconBox,
+                          { backgroundColor: roleColor + '22', borderColor: roleColor + '55' },
+                        ]}
+                      >
                         <RoleIcon size={22} color={roleColor} strokeWidth={2} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.workerName}>{worker.full_name}</Text>
                         <Text style={styles.workerHandle}>
-                          {toUsername(worker.full_name)}@{slug}
+                          {worker.username}.{workspaceCode}
                         </Text>
                         {worker.phone && (
                           <View style={styles.workerPhoneRow}>
@@ -316,7 +315,10 @@ export default function WorkersScreen() {
 
                     <View style={styles.workerActions}>
                       <TouchableOpacity
-                        style={[styles.roleBtn, worker.role === 'manager' ? styles.roleBtnManager : styles.roleBtnWorker]}
+                        style={[
+                          styles.roleBtn,
+                          worker.role === 'manager' ? styles.roleBtnManager : styles.roleBtnWorker,
+                        ]}
                         onPress={() => handleChangeRole(worker)}
                       >
                         {worker.role === 'worker' ? (
@@ -360,7 +362,7 @@ export default function WorkersScreen() {
               <Text style={styles.modalLabel}>FULL NAME *</Text>
               <TextInput
                 style={styles.modalInput}
-                placeholder="e.g. Anthony"
+                placeholder="e.g. Peter"
                 placeholderTextColor="#3D5C3A"
                 value={newName}
                 onChangeText={setNewName}
@@ -369,10 +371,11 @@ export default function WorkersScreen() {
 
               {newName.trim().length > 0 && (
                 <View style={styles.previewBox}>
-                  <Text style={styles.previewLabel}>Their login handle</Text>
+                  <Text style={styles.previewLabel}>Their login</Text>
                   <Text style={styles.previewValue}>
-                    {toUsername(newName.trim())}@{slug}
+                    {toUsername(newName.trim())}.{workspaceCode}
                   </Text>
+                  <Text style={styles.previewHint}>They type this + password to sign in</Text>
                 </View>
               )}
 
@@ -426,7 +429,16 @@ export default function WorkersScreen() {
               </View>
 
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.modalCancel} onPress={() => setCreateVisible(false)}>
+                <TouchableOpacity
+                  style={styles.modalCancel}
+                  onPress={() => {
+                    setCreateVisible(false);
+                    setNewName('');
+                    setNewPhone('');
+                    setNewPassword('');
+                    setNewRole('worker');
+                  }}
+                >
                   <Text style={styles.modalCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -444,13 +456,6 @@ export default function WorkersScreen() {
                   )}
                 </TouchableOpacity>
               </View>
-
-              <Text style={styles.modalHint}>
-                Worker logs in with{' '}
-                {newName.trim()
-                  ? `${toUsername(newName.trim())}@${slug}`
-                  : 'username@yourcompany'}
-              </Text>
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -462,10 +467,14 @@ export default function WorkersScreen() {
           <View style={[styles.modalBox, { paddingBottom: 30 }]}>
             <Text style={styles.modalTitle}>Reset Password</Text>
             <Text style={styles.modalSubtitle}>
-              For <Text style={{ color: '#E8F5E0' }}>{selectedWorker?.full_name}</Text>
+              For <Text style={{ color: '#E8F5E0', fontWeight: '700' }}>{selectedWorker?.full_name}</Text>
+              {'\n'}Login:{' '}
+              <Text style={{ color: '#4CAF50', fontFamily: 'Courier' }}>
+                {selectedWorker?.username}.{workspaceCode}
+              </Text>
             </Text>
 
-            <Text style={styles.modalLabel}>NEW TEMPORARY PASSWORD</Text>
+            <Text style={styles.modalLabel}>NEW TEMPORARY PASSWORD *</Text>
             <View style={styles.iconInput}>
               <Lock size={16} color="#3D5C3A" strokeWidth={2} />
               <TextInput
@@ -480,7 +489,14 @@ export default function WorkersScreen() {
             </View>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setResetVisible(false)}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => {
+                  setResetVisible(false);
+                  setSelectedWorker(null);
+                  setResetPassword('');
+                }}
+              >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -511,7 +527,6 @@ const styles = StyleSheet.create({
   blob1: { width: 400, height: 400, backgroundColor: '#3D8B37', top: -150, right: -150 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   noAccessText: { color: '#7FAE7A', fontSize: 16 },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -532,13 +547,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-
   list: { padding: 20, paddingBottom: 40 },
   emptyState: { alignItems: 'center', paddingTop: 100, gap: 12 },
   emptyText: { color: '#7FAE7A', fontSize: 18, fontWeight: '700' },
   emptySubtext: { color: '#3D5C3A', fontSize: 14, textAlign: 'center', marginTop: 4 },
-
-  // Worker card
   workerCard: {
     backgroundColor: '#162018',
     borderRadius: 16,
@@ -547,7 +559,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
   },
-  workerHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  workerHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   workerIconBox: {
     width: 48,
     height: 48,
@@ -560,8 +572,7 @@ const styles = StyleSheet.create({
   workerHandle: { color: '#4CAF50', fontSize: 13, fontFamily: 'Courier', marginTop: 2 },
   workerPhoneRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   workerPhone: { color: '#3D5C3A', fontSize: 12 },
-
-  workerActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  workerActions: { flexDirection: 'row', gap: 10 },
   roleBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -575,7 +586,6 @@ const styles = StyleSheet.create({
   roleBtnWorker: { borderColor: '#4CAF50' },
   roleBtnManager: { borderColor: '#FFA726' },
   roleBtnText: { fontSize: 13, fontWeight: '600' },
-
   resetBtn: {
     borderWidth: 1.5,
     borderColor: '#42A5F5',
@@ -594,13 +604,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  // Modal (both)
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#162018', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40 },
+  modalBox: {
+    backgroundColor: '#162018',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 40,
+  },
   modalTitle: { color: '#E8F5E0', fontSize: 22, fontWeight: '800', marginBottom: 8 },
-  modalSubtitle: { color: '#7FAE7A', fontSize: 15, marginBottom: 20 },
-
+  modalSubtitle: { color: '#7FAE7A', fontSize: 14, marginBottom: 20, lineHeight: 22 },
   modalLabel: {
     color: '#3D5C3A',
     fontSize: 11,
@@ -631,19 +644,24 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   iconInputText: { flex: 1, color: '#E8F5E0', fontSize: 15, paddingVertical: 12 },
-
   previewBox: {
     backgroundColor: '#0E1A12',
-    borderWidth: 1,
-    borderColor: '#243524',
-    borderRadius: 10,
-    padding: 12,
+    borderWidth: 1.5,
+    borderColor: '#4CAF50',
+    borderRadius: 12,
+    padding: 14,
     marginBottom: 16,
     marginTop: -8,
   },
-  previewLabel: { color: '#3D5C3A', fontSize: 11, fontWeight: '600', marginBottom: 4 },
-  previewValue: { color: '#4CAF50', fontSize: 16, fontWeight: '800', fontFamily: 'Courier' },
-
+  previewLabel: { color: '#3D5C3A', fontSize: 11, fontWeight: '600', marginBottom: 6 },
+  previewValue: {
+    color: '#4CAF50',
+    fontSize: 20,
+    fontWeight: '800',
+    fontFamily: 'Courier',
+    marginBottom: 4,
+  },
+  previewHint: { color: '#3D5C3A', fontSize: 11 },
   roleSelector: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   roleOption: {
     flex: 1,
@@ -664,7 +682,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   roleLabel: { color: '#7FAE7A', fontSize: 14, fontWeight: '600' },
-
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
   modalCancel: {
     flex: 1,
@@ -687,6 +704,4 @@ const styles = StyleSheet.create({
   },
   disabled: { opacity: 0.5 },
   modalConfirmText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-
-  modalHint: { color: '#3D5C3A', fontSize: 12, textAlign: 'center', marginTop: 16, lineHeight: 18 },
 });

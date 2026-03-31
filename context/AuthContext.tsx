@@ -14,6 +14,7 @@ interface Company {
   id: string;
   name: string;
   slug: string;
+  code: string;
 }
 
 interface AuthContextType {
@@ -54,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data.company_id) {
       const { data: co } = await supabase
         .from('companies')
-        .select('id, name, slug')
+        .select('id, name, slug, code')
         .eq('id', data.company_id)
         .single();
       if (co) setCompany(co as Company);
@@ -66,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (s?.user?.id) await fetchProfile(s.user.id);
   };
 
-  const lockSession   = () => { sessionLocked.current = true; };
+  const lockSession = () => { sessionLocked.current = true; };
   const unlockSession = (bossUserId: string) => {
     sessionLocked.current = false;
     fetchProfile(bossUserId);
