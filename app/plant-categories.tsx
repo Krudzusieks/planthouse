@@ -104,7 +104,7 @@ export default function PlantCategoriesScreen() {
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Plant Categories</Text>
+          <Text style={styles.headerTitle}>Categories</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity onPress={handleSeedCategories} style={[styles.seedBtn, seedLoading && styles.btnDisabled]} disabled={seedLoading || catLoading}>
               {seedLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.seedBtnText}>+ Basics</Text>}

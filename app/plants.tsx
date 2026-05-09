@@ -254,7 +254,7 @@ export default function PlantsScreen() {
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Plants 🌱</Text>
+          <Text style={styles.headerTitle}>Plants</Text>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {/* Manual add */}
             <TouchableOpacity onPress={() => setModalVisible(true)} style={styles.addBtn}>
