@@ -91,7 +91,7 @@ export default function LocationsScreen() {
         <ScrollView contentContainerStyle={styles.list}>
           {locations.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🗺️</Text>
+              <Text style={styles.emptyIcon}></Text>
               <Text style={styles.emptyText}>No locations yet</Text>
               <Text style={styles.emptySubtext}>Tap "+" to create your first location (e.g., Sector 1)</Text>
             </View>

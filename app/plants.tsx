@@ -307,7 +307,7 @@ export default function PlantsScreen() {
                 <Text style={styles.emptyIcon}>🪴</Text>
                 <Text style={styles.emptyText}>No plants yet</Text>
                 <Text style={styles.emptySubtext}>
-                  Tap "+ Plant" to add manually or "📚 Library" to browse 50+ pre-made plants
+                  Tap "+ Plant" to add manually or "Library" to browse 50+ pre-made plants
                 </Text>
               </View>
             ) : (

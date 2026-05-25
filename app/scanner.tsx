@@ -20,7 +20,6 @@ export default function ScannerScreen() {
     if (scanned) return;
     setScanned(true);
 
-    // Expected format: PLANTHOUSE_BATCH:<uuid>
     if (data.startsWith('PLANTHOUSE_BATCH:')) {
       const batchId = data.replace('PLANTHOUSE_BATCH:', '').trim();
       if (batchId) {
@@ -28,8 +27,6 @@ export default function ScannerScreen() {
         return;
       }
     }
-
-    // Not a PlantHouse QR
     Alert.alert(
       'Unknown QR Code',
       'This QR code is not a PlantHouse batch code.',

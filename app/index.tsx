@@ -17,7 +17,6 @@ export default function WelcomeScreen() {
   const leafAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // If already logged in, skip welcome screen
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) router.replace('/home');
     });
